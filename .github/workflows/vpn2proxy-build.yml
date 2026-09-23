@@ -40,6 +40,10 @@ jobs:
           ref: vpn2proxy/auth-user
           fetch-depth: 0
 
+      - name: Resolve source commit
+        id: src
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -80,7 +84,7 @@ jobs:
           VER: ${{ inputs.sing_box_version }}
         run: |
           set -euo pipefail
-          NOTES="vpn2proxy build of sing-box ${VER} (source: vpn2proxy/auth-user @ ${{ github.sha }}). GPL-3.0; executed as a separate binary, never linked."
+          NOTES="vpn2proxy build of sing-box ${VER} (source: vpn2proxy/auth-user @ ${{ steps.src.outputs.sha }}). GPL-3.0; executed as a separate binary, never linked."
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" dist/*.tar.gz --clobber
           else

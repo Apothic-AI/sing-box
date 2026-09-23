@@ -1,9 +1,11 @@
 name: vpn2proxy sing-box build
 
-# Builds the vpn2proxy-patched sing-box from the `vpn2proxy/auth-user` branch
-# and publishes linux binaries as a release on this fork (public, so the
-# appliance can curl them without a token). This workflow lives on the
-# `vpn2proxy/ci` branch so the patch branch stays clean for an upstream PR.
+# Builds the vpn2proxy-patched sing-box from the `vpn2proxy/auth-user` branch,
+# against the patched `Apothic-AI/sing-openvpn` fork, and publishes linux
+# binaries as a release on this fork (public, so the appliance can curl them
+# without a token). This workflow lives on the `vpn2proxy/ci` branch so the
+# patch branch stays clean for an upstream PR — the sing-openvpn dependency is
+# swapped in with a transient `go mod edit -replace` (never committed).
 #
 # Dispatch:
 #   gh workflow run "vpn2proxy sing-box build" --ref vpn2proxy/ci \
@@ -22,6 +24,10 @@ on:
         description: "Release tag to publish (immutable; e.g. vpn2proxy-v1.14.1.1)"
         required: true
         default: "vpn2proxy-v1.14.1.1"
+      sing_openvpn_ref:
+        description: "Apothic-AI/sing-openvpn ref to build against"
+        required: true
+        default: "vpn2proxy/auth-user"
 
 permissions:
   contents: write
@@ -34,20 +40,33 @@ jobs:
       matrix:
         goarch: [amd64, arm64]
     steps:
-      - name: Checkout patch branch
+      - name: Checkout sing-box patch branch
         uses: actions/checkout@v4
         with:
           ref: vpn2proxy/auth-user
           fetch-depth: 0
 
-      - name: Resolve source commit
+      - name: Checkout sing-openvpn fork
+        uses: actions/checkout@v4
+        with:
+          repository: Apothic-AI/sing-openvpn
+          ref: ${{ inputs.sing_openvpn_ref }}
+          path: sing-openvpn
+          fetch-depth: 0
+
+      - name: Resolve source commits
         id: src
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "openvpn_sha=$(git -C sing-openvpn rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: "1.25.6"
+
+      - name: Wire the sing-openvpn fork (transient replace; not committed)
+        run: go mod edit -replace github.com/sagernet/sing-openvpn=./sing-openvpn
 
       - name: Build
         env:
@@ -84,7 +103,7 @@ jobs:
           VER: ${{ inputs.sing_box_version }}
         run: |
           set -euo pipefail
-          NOTES="vpn2proxy build of sing-box ${VER} (source: vpn2proxy/auth-user @ ${{ steps.src.outputs.sha }}). GPL-3.0; executed as a separate binary, never linked."
+          NOTES="vpn2proxy build of sing-box ${VER} (sing-box: vpn2proxy/auth-user @ ${{ steps.src.outputs.sha }}; sing-openvpn: ${{ inputs.sing_openvpn_ref }} @ ${{ steps.src.outputs.openvpn_sha }}). GPL-3.0; executed as a separate binary, never linked."
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" dist/*.tar.gz --clobber
           else

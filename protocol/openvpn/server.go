@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"slices"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -46,6 +47,8 @@ type ServerEndpoint struct {
 	localAddresses []netip.Prefix
 	started        atomic.Bool
 	readLoopDone   chan struct{}
+	userAccess     sync.RWMutex
+	usersBySource  map[netip.Addr]string
 }
 
 type udpEgressPacketConn struct {
@@ -85,7 +88,9 @@ func NewServerEndpoint(ctx context.Context, router adapter.Router, logger log.Co
 		options:        options,
 		dnsRouter:      service.FromContext[adapter.DNSRouter](ctx),
 		localAddresses: options.Address,
+		usersBySource:  make(map[netip.Addr]string),
 	}
+	serverEndpoint.userForSource = serverEndpoint.authUserForSource
 	serverOptions, err := buildServerOptions(options)
 	if err != nil {
 		cancelLoop()
@@ -611,6 +616,13 @@ func (s *ServerEndpoint) readLoop() {
 		}
 		packetBuffers := make([]*buf.Buffer, len(serverPacketBuffers))
 		for i, packetBuffer := range serverPacketBuffers {
+			if packetBuffer.AuthUser != "" {
+				if source := openVPNPacketSource(packetBuffer.Buffer.Bytes()); source.IsValid() {
+					s.userAccess.Lock()
+					s.usersBySource[source] = packetBuffer.AuthUser
+					s.userAccess.Unlock()
+				}
+			}
 			packetBuffers[i] = packetBuffer.Buffer
 		}
 		err = s.device.WriteInboundBuffers(packetBuffers)
@@ -620,6 +632,16 @@ func (s *ServerEndpoint) readLoop() {
 			return
 		}
 	}
+}
+
+func (s *ServerEndpoint) authUserForSource(source netip.Addr) string {
+	if !source.IsValid() {
+		return ""
+	}
+	s.userAccess.RLock()
+	user := s.usersBySource[source]
+	s.userAccess.RUnlock()
+	return user
 }
 
 func (s *ServerEndpoint) Close() error {

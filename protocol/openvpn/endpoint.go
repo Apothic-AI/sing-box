@@ -36,6 +36,9 @@ type endpointBase struct {
 	endpoint.Adapter
 	router adapter.Router
 	logger log.ContextLogger
+	// userForSource associates a dynamically allocated OpenVPN tunnel address
+	// with the username authenticated for that session.
+	userForSource func(netip.Addr) string
 }
 
 func (e *endpointBase) SupportsFlow(network string) bool {
@@ -47,6 +50,9 @@ func (e *endpointBase) newConnection(ctx context.Context, endpoint adapter.Endpo
 	metadata.Inbound = endpoint.Tag()
 	metadata.InboundType = endpoint.Type()
 	metadata.Source = source
+	if e.userForSource != nil {
+		metadata.User = e.userForSource(source.Addr)
+	}
 	if isEndpointLocalAddress(localAddresses, destination.Addr) {
 		metadata.OriginDestination = destination
 		destination.Addr = loopbackAddressFor(destination.Addr)
@@ -62,6 +68,9 @@ func (e *endpointBase) newPacketConnection(ctx context.Context, endpoint adapter
 	metadata.Inbound = endpoint.Tag()
 	metadata.InboundType = endpoint.Type()
 	metadata.Source = source
+	if e.userForSource != nil {
+		metadata.User = e.userForSource(source.Addr)
+	}
 	if isEndpointLocalAddress(localAddresses, destination.Addr) {
 		metadata.OriginDestination = destination
 		destination.Addr = loopbackAddressFor(destination.Addr)
@@ -79,6 +88,9 @@ func (e *endpointBase) newDNSPacket(ctx context.Context, endpoint adapter.Endpoi
 	metadata.InboundType = endpoint.Type()
 	metadata.Network = N.NetworkUDP
 	metadata.Source = source
+	if e.userForSource != nil {
+		metadata.User = e.userForSource(source.Addr)
+	}
 	metadata.Destination = destination
 	metadata.Protocol = C.ProtocolDNS
 	e.logger.InfoContext(ctx, "inbound DNS packet from ", source)
@@ -99,6 +111,23 @@ func loopbackAddressFor(address netip.Addr) netip.Addr {
 		return netip.AddrFrom4([4]uint8{127, 0, 0, 1})
 	}
 	return netip.IPv6Loopback()
+}
+
+func openVPNPacketSource(packet []byte) netip.Addr {
+	switch header.IPVersion(packet) {
+	case header.IPv4Version:
+		if len(packet) < header.IPv4MinimumSize {
+			return netip.Addr{}
+		}
+		return header.IPv4(packet).SourceAddr()
+	case header.IPv6Version:
+		if len(packet) < header.IPv6MinimumSize {
+			return netip.Addr{}
+		}
+		return header.IPv6(packet).SourceAddr()
+	default:
+		return netip.Addr{}
+	}
 }
 
 func judgeOpenVPNFlow(router adapter.Router, tag string, endpointType string, localAddresses []netip.Prefix, network uint8, source netip.AddrPort, destination netip.AddrPort, firstPacket []byte) tun.FlowVerdict {

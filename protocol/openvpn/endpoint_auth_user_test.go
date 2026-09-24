@@ -7,6 +7,7 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/route/rule"
 	ovpn "github.com/sagernet/sing-openvpn"
+	"github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common/buf"
 	"github.com/stretchr/testify/require"
 )
@@ -26,10 +27,28 @@ func TestServerDataAuthUserFlowsIntoAuthUserRule(t *testing.T) {
 
 	// The userspace device can report an IPv4-mapped source address. The full
 	// buffer -> source map -> routed metadata path must normalize both forms.
-	metadata := adapter.InboundContext{User: server.authUserForSource(
-		netip.MustParseAddr("::ffff:10.200.1.7"),
-	)}
-	require.True(t, rule.NewAuthUserItem([]string{"dev-user"}).Match(&metadata))
+	seen := ""
+	server.router = &authUserPreMatchRouter{seen: &seen}
+	verdict := server.JudgeFlow(
+		6, // TCP
+		netip.AddrPortFrom(netip.MustParseAddr("::ffff:10.200.1.7"), 1234),
+		netip.AddrPortFrom(netip.MustParseAddr("1.1.1.1"), 443), nil,
+	)
+	require.Equal(t, "dev-user", seen)
+	require.Equal(t, tun.ActionReject, verdict.Action)
+}
+
+type authUserPreMatchRouter struct {
+	adapter.Router
+	seen *string
+}
+
+func (r *authUserPreMatchRouter) PreMatch(metadata adapter.InboundContext, _ []byte) adapter.PreMatchResult {
+	*r.seen = metadata.User
+	if rule.NewAuthUserItem([]string{"dev-user"}).Match(&metadata) {
+		return adapter.PreMatchResult{Action: adapter.PreMatchReject}
+	}
+	return adapter.PreMatchResult{Action: adapter.PreMatchContinue}
 }
 
 func TestOpenVPNPacketSource(t *testing.T) {

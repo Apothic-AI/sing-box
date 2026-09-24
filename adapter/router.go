@@ -50,6 +50,14 @@ type PreMatchResult struct {
 }
 
 func JudgeFlow(router Router, inbound string, inboundType string, network uint8, source netip.AddrPort, destination netip.AddrPort, firstPacket []byte) tun.FlowVerdict {
+	return JudgeFlowWithUser(router, inbound, inboundType, network, source, destination, firstPacket, "")
+}
+
+// JudgeFlowWithUser is JudgeFlow with an authenticated user carried into the
+// routing metadata. OpenVPN server flows use this fast path before a full
+// connection handler exists, so dropping User here would make auth_user rules
+// ineffective for TCP/UDP traffic.
+func JudgeFlowWithUser(router Router, inbound string, inboundType string, network uint8, source netip.AddrPort, destination netip.AddrPort, firstPacket []byte, user string) tun.FlowVerdict {
 	var networkName string
 	switch network {
 	case uint8(header.TCPProtocolNumber):
@@ -67,6 +75,7 @@ func JudgeFlow(router Router, inbound string, inboundType string, network uint8,
 		Network:     networkName,
 		Source:      M.SocksaddrFromNetIP(source),
 		Destination: M.SocksaddrFromNetIP(destination),
+		User:        user,
 	}
 	if networkName == N.NetworkICMP {
 		metadata.Source.Port = 0

@@ -639,6 +639,9 @@ func (s *ServerEndpoint) rememberAuthUser(packetBuffer ovpn.ServerDataBuffer) {
 	s.userAccess.Lock()
 	s.usersBySource[source] = packetBuffer.AuthUser
 	s.userAccess.Unlock()
+	if s.logger != nil {
+		s.logger.Debug("openvpn auth user mapped: source=", source, " user=", packetBuffer.AuthUser)
+	}
 }
 
 func (s *ServerEndpoint) authUserForSource(source netip.Addr) string {
@@ -649,6 +652,9 @@ func (s *ServerEndpoint) authUserForSource(source netip.Addr) string {
 	s.userAccess.RLock()
 	user := s.usersBySource[source]
 	s.userAccess.RUnlock()
+	if s.logger != nil {
+		s.logger.Debug("openvpn auth user lookup: source=", source, " user=", user)
+	}
 	return user
 }
 
@@ -694,7 +700,13 @@ func (s *ServerEndpoint) DetachReturn(returnPath tun.Return) error {
 }
 
 func (s *ServerEndpoint) JudgeFlow(network uint8, source netip.AddrPort, destination netip.AddrPort, firstPacket []byte) tun.FlowVerdict {
-	return judgeOpenVPNFlow(s.router, s.Tag(), s.Type(), s.localAddresses, network, source, destination, firstPacket)
+	for _, localPrefix := range s.localAddresses {
+		if destination.Addr() == localPrefix.Addr() {
+			return tun.FlowVerdict{Action: tun.ActionAccept}
+		}
+	}
+	return adapter.JudgeFlowWithUser(s.router, s.Tag(), s.Type(), network, source, destination,
+		firstPacket, s.authUserForSource(source.Addr()))
 }
 
 func (s *ServerEndpoint) NewDNSPacket(payload []byte, source M.Socksaddr, destination M.Socksaddr, writer N.PacketWriter) {

@@ -639,9 +639,6 @@ func (s *ServerEndpoint) rememberAuthUser(packetBuffer ovpn.ServerDataBuffer) {
 	s.userAccess.Lock()
 	s.usersBySource[source] = packetBuffer.AuthUser
 	s.userAccess.Unlock()
-	if s.logger != nil {
-		s.logger.Debug("openvpn auth user mapped: source=", source, " user=", packetBuffer.AuthUser)
-	}
 }
 
 func (s *ServerEndpoint) authUserForSource(source netip.Addr) string {
@@ -652,9 +649,6 @@ func (s *ServerEndpoint) authUserForSource(source netip.Addr) string {
 	s.userAccess.RLock()
 	user := s.usersBySource[source]
 	s.userAccess.RUnlock()
-	if s.logger != nil {
-		s.logger.Debug("openvpn auth user lookup: source=", source, " user=", user)
-	}
 	return user
 }
 

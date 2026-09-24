@@ -616,13 +616,7 @@ func (s *ServerEndpoint) readLoop() {
 		}
 		packetBuffers := make([]*buf.Buffer, len(serverPacketBuffers))
 		for i, packetBuffer := range serverPacketBuffers {
-			if packetBuffer.AuthUser != "" {
-				if source := openVPNPacketSource(packetBuffer.Buffer.Bytes()); source.IsValid() {
-					s.userAccess.Lock()
-					s.usersBySource[source] = packetBuffer.AuthUser
-					s.userAccess.Unlock()
-				}
-			}
+			s.rememberAuthUser(packetBuffer)
 			packetBuffers[i] = packetBuffer.Buffer
 		}
 		err = s.device.WriteInboundBuffers(packetBuffers)
@@ -634,7 +628,21 @@ func (s *ServerEndpoint) readLoop() {
 	}
 }
 
+func (s *ServerEndpoint) rememberAuthUser(packetBuffer ovpn.ServerDataBuffer) {
+	if packetBuffer.AuthUser == "" || packetBuffer.Buffer == nil {
+		return
+	}
+	source := openVPNPacketSource(packetBuffer.Buffer.Bytes())
+	if !source.IsValid() {
+		return
+	}
+	s.userAccess.Lock()
+	s.usersBySource[source] = packetBuffer.AuthUser
+	s.userAccess.Unlock()
+}
+
 func (s *ServerEndpoint) authUserForSource(source netip.Addr) string {
+	source = normalizeOpenVPNSource(source)
 	if !source.IsValid() {
 		return ""
 	}

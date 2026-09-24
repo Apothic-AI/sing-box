@@ -119,15 +119,22 @@ func openVPNPacketSource(packet []byte) netip.Addr {
 		if len(packet) < header.IPv4MinimumSize {
 			return netip.Addr{}
 		}
-		return header.IPv4(packet).SourceAddr()
+		return normalizeOpenVPNSource(header.IPv4(packet).SourceAddr())
 	case header.IPv6Version:
 		if len(packet) < header.IPv6MinimumSize {
 			return netip.Addr{}
 		}
-		return header.IPv6(packet).SourceAddr()
+		return normalizeOpenVPNSource(header.IPv6(packet).SourceAddr())
 	default:
 		return netip.Addr{}
 	}
+}
+
+func normalizeOpenVPNSource(source netip.Addr) netip.Addr {
+	if !source.IsValid() {
+		return netip.Addr{}
+	}
+	return source.Unmap()
 }
 
 func judgeOpenVPNFlow(router adapter.Router, tag string, endpointType string, localAddresses []netip.Prefix, network uint8, source netip.AddrPort, destination netip.AddrPort, firstPacket []byte) tun.FlowVerdict {
